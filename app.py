@@ -40,7 +40,7 @@ SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional con **Auto-actualización por JavaScript**, Velas Japonesas, RSI, MACD, Bollinger y Libro de Órdenes.")
+st.markdown("Análisis técnico profesional con **Auto-actualización sincronizada al reloj**, Velas Japonesas, RSI, MACD y Bollinger.")
 
 # ==========================================
 # BARRA LATERAL (Ajustes de Temporalidad)
@@ -49,7 +49,7 @@ st.sidebar.header("🎛️ Ajustes del Sistema")
 temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
 
 # ==========================================
-# CÁLCULO DE TIEMPO EXACTO AL RELOJ
+# CÁLCULO DE TIEMPO EXACTO AL RELOJ REAL
 # ==========================================
 now = datetime.now()
 current_minute = now.minute
@@ -65,7 +65,7 @@ if segundos_para_cierre <= 0:
     segundos_para_cierre = intervalo_val * 60
 
 # ==========================================
-# TEMPORIZADOR NATIVO JS (CORREGIDO CON LLAVES DOBLES)
+# TEMPORIZADOR NATIVO JS (SINCRONIZADO)
 # ==========================================
 ms_refr = segundos_para_cierre * 1000
 js_code = f"""
@@ -75,12 +75,12 @@ js_code = f"""
     }}, {ms_refr});
 </script>
 <div style="font-size: 13px; color: #8b949e; margin-bottom: 10px;">
-    ⏱️ Siguiente actualización automática en: <span id="timer">{segundos_para_cierre}</span> segundos...
+    ⏱️ Siguiente actualización de ciclo en: <span id="timer">{segundos_para_cierre}</span> segundos...
 </div>
 <script>
     var timeLeft = {segundos_para_cierre};
-    var timerId = setInterval(ionarTimer, 1000);
-    function ionarTimer() {{
+    var timerId = setInterval(iniciarTimer, 1000);
+    function iniciarTimer() {{
         if (timeLeft <= 0) {{
             clearInterval(timerId);
         }} else {{
@@ -177,20 +177,6 @@ def parse_klines(data):
         df[col] = df[col].astype(float)
     return df
 
-def get_order_book():
-    url = f"https://api.binance.com/api/v3/depth?symbol={SYMBOL}&limit=6"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            res = response.json()
-            bids = pd.DataFrame(res.get('bids', []), columns=['Precio', 'Cantidad']).astype(float)
-            asks = pd.DataFrame(res.get('asks', []), columns=['Precio', 'Cantidad']).astype(float)
-            return bids, asks
-    except Exception:
-        pass
-    return pd.DataFrame(), pd.DataFrame()
-
 # ==========================================
 # INTERFAZ PRINCIPAL
 # ==========================================
@@ -207,7 +193,7 @@ try:
     # Métricas principales arriba
     col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
     col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-    col_m3.metric("Ciclo Actual", f"{temporalidad}")
+    col_m3.metric("Ciclo Temporal", f"{temporalidad}")
     
     with col_btn:
         st.write("") 
@@ -256,7 +242,7 @@ try:
     else:
         st.info(f"⏳ **MERCADO INDECISO (ESPERA)**\n\nTemporalidad: **{temporalidad}**. Las herramientas no muestran confluencia firme en este ciclo.")
 
-    # Gráfico interactivo de Velas Japonesas
+    # Gráfico interactivo de Velas Japonesas limpio
     st.subheader(f"📊 Gráfico de Velas Japonesas - BTC/USDT ({temporalidad})")
     
     fig = go.Figure(data=[go.Candlestick(
@@ -272,30 +258,12 @@ try:
         xaxis_title="Hora",
         yaxis_title="Precio (USDT)",
         template="plotly_dark",
-        height=420,
+        height=450,
         margin=dict(l=10, r=10, t=10, b=10),
         xaxis_rangeslider_visible=False
     )
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': True})
 
-    # Libro de Órdenes
-    st.subheader("📖 Libro de Órdenes en Tiempo Real (Binance)")
-    bids, asks = get_order_book()
-
-    if not bids.empty and not asks.empty:
-        col_bids, col_asks = st.columns(2)
-        
-        with col_bids:
-            st.markdown("🟢 **Órdenes de Compra (Bids)**")
-            st.dataframe(bids, use_container_width=True, hide_index=True)
-            
-        with col_asks:
-            st.markdown("🔴 **Órdenes de Venta (Asks)**")
-            st.dataframe(asks, use_container_width=True, hide_index=True)
-    else:
-        st.info("Cargando libro de órdenes de Binance...")
-
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
-                     

@@ -73,13 +73,33 @@ def calculate_bollinger_bands(prices, period=20, num_std=2):
     return upper_band, sma, lower_band
 
 def get_binance_data(interval):
+    # Intentamos primero con la API global de Binance usando Headers de navegador
     url = f"https://api.binance.com/api/v3/klines?symbol={SYMBOL}&interval={interval}&limit=60"
-    response = requests.get(url, timeout=10)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                return parse_klines(data)
+    except Exception:
+        pass
+
+    # Si falla Binance, usamos una API pública alternativa de respaldo (CoinGecko o Endpoint alternativo)
+    # Como respaldo de emergencia para velas si Binance bloquea la IP:
+    url_backup = f"https://data-api.binance.vision/api/v3/klines?symbol={SYMBOL}&interval={interval}&limit=60"
+    response = requests.get(url_backup, headers=headers, timeout=10)
     data = response.json()
     
-    if not isinstance(data, list) or len(data) == 0:
-        raise ValueError("No se recibieron datos válidos de la API de Binance.")
+    if isinstance(data, list) and len(data) > 0:
+        return parse_klines(data)
+        
+    raise ValueError("Binance bloqueó la IP del servidor o no respondió datos válidos.")
 
+def parse_klines(data):
     df = pd.DataFrame(data, columns=[
         'Open_time', 'Open', 'High', 'Low', 'Close', 'Volume',
         'Close_time', 'Quote_asset_volume', 'Number_of_trades',
@@ -88,7 +108,6 @@ def get_binance_data(interval):
     df['Time'] = pd.to_datetime(df['Open_time'], unit='ms')
     for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
         df[col] = df[col].astype(float)
-        
     return df
 
 # ==========================================
@@ -108,7 +127,6 @@ try:
         _, macd_hist = calculate_macd(closes)
         upper_b, middle_b, lower_b = calculate_bollinger_bands(closes, 20, 2)
         
-        # Volumen seguro
         vol_len = min(10, len(volumes) - 1)
         volumen_promedio = sum(volumes[-(vol_len+1):-1]) / vol_len if vol_len > 0 else volumes[-1]
         volumen_fuerte = volumes[-1] > (volumen_promedio * 1.1)
@@ -180,4 +198,4 @@ try:
 
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
-    
+            

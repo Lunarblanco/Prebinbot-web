@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA WEB Y ESTILOS
@@ -40,7 +40,7 @@ SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional sincronizado al reloj del mercado para **Scalping (1m) y Estándar (5m)**.")
+st.markdown("Análisis técnico profesional con **Auto-actualización por JavaScript**, Velas Japonesas, RSI, MACD, Bollinger y Libro de Órdenes.")
 
 # ==========================================
 # BARRA LATERAL (Ajustes de Temporalidad)
@@ -49,7 +49,7 @@ st.sidebar.header("🎛️ Ajustes del Sistema")
 temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
 
 # ==========================================
-# CÁLCULO DE TIEMPO EXACTO AL RELOJ (BLINDADO)
+# CÁLCULO DE TIEMPO EXACTO AL RELOJ
 # ==========================================
 now = datetime.now()
 current_minute = now.minute
@@ -61,13 +61,37 @@ if minutos_faltantes == intervalo_val and current_second > 0:
     minutos_faltantes = 0
     
 segundos_para_cierre = (minutos_faltantes * 60) - current_second
-
-# Blindaje de seguridad para evitar bloqueos en 0 o 60 segundos
 if segundos_para_cierre <= 0:
     segundos_para_cierre = intervalo_val * 60
 
-# Auto-refresh dinámico sincronizado a los milisegundos restantes reales
-st_autorefresh(interval=segundos_para_cierre * 1000, limit=None, key="reloj_sincronizado_loop")
+# ==========================================
+# TEMPORIZADOR NATIVO JS (SE AUTO-REFRESCA SOLO)
+# ==========================================
+ms_refr = segundos_para_cierre * 1000
+js_code = f"""
+<script>
+    setTimeout(function() {{
+        window.location.reload();
+    }}, {ms_refr});
+</script>
+<div style="font-size: 13px; color: #8b949e; margin-bottom: 10px;">
+    ⏱️ Siguiente actualización automática en: <span id="timer">{segundos_para_cierre}</span> segundos...
+</div>
+<script>
+    var timeLeft = {segundos_para_cierre};
+    var timerId = setInterval(ionarTimer, 1000);
+    function ionarTimer() {
+        if (timeLeft <= 0) {
+            clearInterval(timerId);
+        } else {
+            timeLeft -= 1;
+            var elem = document.getElementById("timer");
+            if(elem) elem.innerHTML = timeLeft;
+        }
+    }
+</script>
+"""
+components.html(js_code, height=35)
 
 # ==========================================
 # FUNCIONES TÉCNICAS Y DE DATOS
@@ -180,10 +204,10 @@ try:
     current_price = closes[-1]
     rsi = calculate_rsi(closes, 7)
 
-    # Métricas principales arriba mostrando el tiempo exacto restante
+    # Métricas principales arriba
     col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
     col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-    col_m3.metric("Cierre de Ciclo Real", f"{temporalidad} (en {segundos_para_cierre}s)")
+    col_m3.metric("Ciclo Actual", f"{temporalidad}")
     
     with col_btn:
         st.write("") 
@@ -214,7 +238,7 @@ try:
     bajista_confluencia = (
         len(closes) >= 3 and
         closes[-1] < closes[-2] and
-        closes[-2] < closes[-3] and
+        closes[-2] > closes[-3] and
         rsi > 28 and
         macd_hist < 0 and
         current_price >= lower_b
@@ -274,3 +298,4 @@ try:
 
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
+        

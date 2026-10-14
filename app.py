@@ -4,27 +4,57 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # ==========================================
-# CONFIGURACIÓN DE LA PÁGINA WEB
+# CONFIGURACIÓN DE LA PÁGINA WEB Y ESTILOS
 # ==========================================
 st.set_page_config(
     page_title="BTC/USDT Señales PRO",
-    page_icon="📈",
+    page_icon="⚡",
     layout="wide"
 )
+
+# Estilos CSS personalizados para mejorar la paleta de colores y aspecto visual
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #0b0f19;
+        color: #e6edf3;
+    }
+    div.stButton > button {
+        background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+        color: white;
+        border-radius: 8px;
+        font-weight: bold;
+        border: none;
+        padding: 0.5rem 1rem;
+    }
+    div.stButton > button:hover {
+        background: linear-gradient(135deg, #2ea043 0%, #3fb950 100%);
+        color: white;
+    }
+    .metric-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional con **Velas Japonesas, RSI (7), MACD, Bandas de Bollinger y Volumen**.")
-
-# Barra lateral para controles
-st.sidebar.header("🎛️ Configuración de Análisis")
-temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
-modo_analisis = st.sidebar.button("🔍 Actualizar Análisis")
+st.markdown("Análisis técnico profesional con **Velas Japonesas, RSI (7), MACD, Bandas de Bollinger, Volumen y Libro de Órdenes**.")
 
 # ==========================================
-# FUNCIONES TÉCNICAS SEGURAS
+# BARRA LATERAL (Configuración limpia)
+# ==========================================
+st.sidebar.header("🎛️ Ajustes del Sistema")
+temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
+
+# ==========================================
+# FUNCIONES TÉCNICAS Y DE DATOS
 # ==========================================
 def calculate_rsi(prices, period=7):
     if len(prices) < period + 1:
@@ -73,7 +103,6 @@ def calculate_bollinger_bands(prices, period=20, num_std=2):
     return upper_band, sma, lower_band
 
 def get_binance_data(interval):
-    # Intentamos primero con la API global de Binance usando Headers de navegador
     url = f"https://api.binance.com/api/v3/klines?symbol={SYMBOL}&interval={interval}&limit=60"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -88,8 +117,6 @@ def get_binance_data(interval):
     except Exception:
         pass
 
-    # Si falla Binance, usamos una API pública alternativa de respaldo (CoinGecko o Endpoint alternativo)
-    # Como respaldo de emergencia para velas si Binance bloquea la IP:
     url_backup = f"https://data-api.binance.vision/api/v3/klines?symbol={SYMBOL}&interval={interval}&limit=60"
     response = requests.get(url_backup, headers=headers, timeout=10)
     data = response.json()
@@ -110,92 +137,129 @@ def parse_klines(data):
         df[col] = df[col].astype(float)
     return df
 
+def get_order_book():
+    """Obtiene el libro de órdenes en tiempo real de Binance (Bids y Asks)"""
+    url = f"https://api.binance.com/api/v3/depth?symbol={SYMBOL}&limit=8"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            res = response.json()
+            bids = pd.DataFrame(res.get('bids', []), columns=['Precio', 'Cantidad']).astype(float)
+            asks = pd.DataFrame(res.get('asks', []), columns=['Precio', 'Cantidad']).astype(float)
+            return bids, asks
+    except Exception:
+        pass
+    return pd.DataFrame(), pd.DataFrame()
+
 # ==========================================
-# EJECUCIÓN DEL ANÁLISIS
+# INTERFAZ PRINCIPAL Y ACCIÓN DE ACTUALIZAR
 # ==========================================
+col_m1, col_m2, col_m3, col_btn = st.columns([2, 2, 2, 2])
+
 try:
     df_data = get_binance_data(temporalidad)
     closes = df_data['Close'].tolist()
     volumes = df_data['Volume'].tolist()
     
-    if len(closes) < 10:
-        st.warning("⚠️ Esperando suficientes velas para calcular los indicadores...")
+    current_price = closes[-1]
+    rsi = calculate_rsi(closes, 7)
+
+    # Métricas principales arriba
+    col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
+    col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
+    col_m3.metric("Temporalidad", temporalidad)
+    
+    with col_btn:
+        st.write("") 
+        actualizar = st.button("🔄 Actualizar Análisis", use_container_width=True)
+
+    st.markdown("---")
+
+    _, macd_hist = calculate_macd(closes)
+    upper_b, middle_b, lower_b = calculate_bollinger_bands(closes, 20, 2)
+    
+    vol_len = min(10, len(volumes) - 1)
+    volumen_promedio = sum(volumes[-(vol_len+1):-1]) / vol_len if vol_len > 0 else volumes[-1]
+    volumen_fuerte = volumes[-1] > (volumen_promedio * 1.1)
+
+    ancho_bandas = (upper_b - lower_b) / middle_b if middle_b > 0 else 0
+    es_lateral = ancho_bandas < 0.0015 or (len(closes) >= 5 and abs(closes[-1] - closes[-5]) < current_price * 0.0003)
+
+    alcista_confluencia = (
+        len(closes) >= 3 and
+        closes[-1] > closes[-2] and
+        closes[-2] > closes[-3] and
+        rsi < 72 and
+        macd_hist > 0 and
+        current_price <= upper_b
+    )
+
+    bajista_confluencia = (
+        len(closes) >= 3 and
+        closes[-1] < closes[-2] and
+        closes[-2] < closes[-3] and
+        rsi > 28 and
+        macd_hist < 0 and
+        current_price >= lower_b
+    )
+
+    # Estado de la predicción
+    if es_lateral:
+        st.warning("⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nEl precio está comprimido en las Bandas de Bollinger o sin fuerza direccional clara. Evita operar.")
+    elif alcista_confluencia:
+        base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
+        probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
+        st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
+    elif bajista_confluencia:
+        base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
+        probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
+        st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
     else:
-        current_price = closes[-1]
+        st.info("⏳ **MERCADO INDECISO (ESPERA)**\n\nLas herramientas no muestran confluencia clara en este ciclo.")
+
+    # Gráfico interactivo de Velas Japonesas optimizado (Zoom táctil fluido)
+    st.subheader(f"📊 Gráfico de Velas Japonesas - BTC/USDT ({temporalidad})")
+    
+    fig = go.Figure(data=[go.Candlestick(
+        x=df_data['Time'],
+        open=df_data['Open'],
+        high=df_data['High'],
+        low=df_data['Low'],
+        close=df_data['Close'],
+        name="BTC"
+    )])
+    
+    fig.update_layout(
+        xaxis_title="Hora",
+        yaxis_title="Precio (USDT)",
+        template="plotly_dark",
+        height=420,
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis_rangeslider_visible=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': True})
+
+    # ==========================================
+    # SECCIÓN NUEVA: LIBRO DE ÓRDENES (ORDER BOOK)
+    # ==========================================
+    st.subheader("📖 Libro de Órdenes en Tiempo Real (Binance)")
+    bids, asks = get_order_book()
+
+    if not bids.empty and not asks.empty:
+        col_bids, col_asks = st.columns(2)
         
-        rsi = calculate_rsi(closes, 7)
-        _, macd_hist = calculate_macd(closes)
-        upper_b, middle_b, lower_b = calculate_bollinger_bands(closes, 20, 2)
-        
-        vol_len = min(10, len(volumes) - 1)
-        volumen_promedio = sum(volumes[-(vol_len+1):-1]) / vol_len if vol_len > 0 else volumes[-1]
-        volumen_fuerte = volumes[-1] > (volumen_promedio * 1.1)
-
-        ancho_bandas = (upper_b - lower_b) / middle_b if middle_b > 0 else 0
-        es_lateral = ancho_bandas < 0.0015 or (len(closes) >= 5 and abs(closes[-1] - closes[-5]) < current_price * 0.0003)
-
-        alcista_confluencia = (
-            len(closes) >= 3 and
-            closes[-1] > closes[-2] and
-            closes[-2] > closes[-3] and
-            rsi < 72 and
-            macd_hist > 0 and
-            current_price <= upper_b
-        )
-
-        bajista_confluencia = (
-            len(closes) >= 3 and
-            closes[-1] < closes[-2] and
-            closes[-2] < closes[-3] and
-            rsi > 28 and
-            macd_hist < 0 and
-            current_price >= lower_b
-        )
-
-        # Mostrar métricas clave en la web
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Precio Actual BTC", f"${current_price:,.2f}")
-        col2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-        col3.metric("Temporalidad", temporalidad)
-
-        st.markdown("---")
-
-        # Resultados de la predicción con diseño visual atractivo
-        if es_lateral:
-            st.warning("⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nEl precio está comprimido en las Bandas de Bollinger o sin fuerza direccional clara. Se recomienda evitar operaciones para proteger el capital.")
-        elif alcista_confluencia:
-            base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
-            probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
-            st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Probabilidad de Confluencia:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
-        elif bajista_confluencia:
-            base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
-            probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
-            st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Probabilidad de Confluencia:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
-        else:
-            st.info("⏳ **MERCADO INDECISO (ESPERA)**\n\nLas herramientas técnicas no muestran una confluencia firme en este ciclo. Es mejor esperar la siguiente vela.")
-
-        # Gráfico interactivo de Velas Japonesas con Plotly
-        st.subheader(f"📊 Gráfico de Velas Japonesas - BTC/USDT ({temporalidad})")
-        
-        fig = go.Figure(data=[go.Candlestick(
-            x=df_data['Time'],
-            open=df_data['Open'],
-            high=df_data['High'],
-            low=df_data['Low'],
-            close=df_data['Close'],
-            name="BTC"
-        )])
-        
-        fig.update_layout(
-            xaxis_title="Hora",
-            yaxis_title="Precio (USDT)",
-            template="plotly_dark",
-            height=450,
-            margin=dict(l=10, r=10, t=10, b=10)
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+        with col_bids:
+            st.markdown("🟢 **Órdenes de Compra (Bids)**")
+            st.dataframe(bids, use_container_width=True, hide_index=True)
+            
+        with col_asks:
+            st.markdown("🔴 **Órdenes de Venta (Asks)**")
+            st.dataframe(asks, use_container_width=True, hide_index=True)
+    else:
+        st.info("Cargando libro de órdenes de Binance...")
 
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
-            
+    

@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA WEB Y ESTILOS
@@ -13,7 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilos CSS personalizados (Paleta oscura profesional)
+# Estilos CSS profesionales personalizados (Paleta oscura moderna)
 st.markdown("""
     <style>
     .stApp {
@@ -39,13 +40,32 @@ SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional sincronizado para **Scalping (1m) y Estándar (5m)** con Velas Japonesas, RSI, MACD, Bollinger y Libro de Órdenes.")
+st.markdown("Análisis técnico profesional sincronizado al reloj del mercado para **Scalping (1m) y Estándar (5m)**.")
 
 # ==========================================
 # BARRA LATERAL (Ajustes de Temporalidad)
 # ==========================================
 st.sidebar.header("🎛️ Ajustes del Sistema")
 temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
+
+# ==========================================
+# CÁLCULO DE TIEMPO EXACTO AL RELOJ (CRONOGRAMA DE VELAS)
+# ==========================================
+now = datetime.now()
+current_minute = now.minute
+current_second = now.second
+
+intervalo_val = 1 if temporalidad == "1m" else 5
+minutos_faltantes = intervalo_val - (current_minute % intervalo_val)
+if minutos_faltantes == intervalo_val and current_second > 0:
+    minutos_faltantes = 0
+    
+segundos_para_cierre = (minutos_faltantes * 60) - current_second
+if segundos_para_cierre <= 0:
+    segundos_para_cierre = intervalo_val * 60
+
+# Auto-refresh dinámico sincronizado exactamente a los segundos restantes del reloj
+st_autorefresh(interval=segundos_para_cierre * 1000, limit=None, key="reloj_sincronizado_loop")
 
 # ==========================================
 # FUNCIONES TÉCNICAS Y DE DATOS
@@ -146,22 +166,6 @@ def get_order_book():
     return pd.DataFrame(), pd.DataFrame()
 
 # ==========================================
-# CONTROL DE TIEMPO Y CICLOS EXACTOS
-# ==========================================
-now = datetime.now()
-current_minute = now.minute
-current_second = now.second
-
-# Cálculo del tiempo restante para el siguiente cierre de vela según el periodo
-intervalo_val = 1 if temporalidad == "1m" else 5
-minutos_faltantes = intervalo_val - (current_minute % intervalo_val)
-if minutos_faltantes == intervalo_val and current_second > 0:
-    minutos_faltantes = 0
-segundos_para_cierre = (minutos_faltantes * 60) - current_second
-if segundos_para_cierre <= 0:
-    segundos_para_cierre = intervalo_val * 60
-
-# ==========================================
 # INTERFAZ PRINCIPAL
 # ==========================================
 col_m1, col_m2, col_m3, col_btn = st.columns([2, 2, 2, 2])
@@ -174,17 +178,18 @@ try:
     current_price = closes[-1]
     rsi = calculate_rsi(closes, 7)
 
-    # Métricas principales arriba
+    # Métricas principales arriba mostrando el tiempo exacto que falta según el reloj
     col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
     col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-    col_m3.metric("Ciclo Actual", f"{temporalidad} (Cierra en {segundos_para_cierre}s)")
+    col_m3.metric("Cierre de Ciclo Real", f"{temporalidad} (en {segundos_para_cierre}s)")
     
     with col_btn:
         st.write("") 
-        actualizar = st.button("🔄 Actualizar Análisis", use_container_width=True)
+        actualizar_manual = st.button("🔄 Actualizar Señal", use_container_width=True)
 
     st.markdown("---")
 
+    # Análisis técnico
     _, macd_hist = calculate_macd(closes)
     upper_b, middle_b, lower_b = calculate_bollinger_bands(closes, 20, 2)
     
@@ -213,21 +218,19 @@ try:
         current_price >= lower_b
     )
 
-    # Estado de la predicción con los ciclos sincronizados
+    probabilidad = round(min(94.5, max(70.0, 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100))), 1)
+
+    # Mensaje de señal
     if es_lateral:
-        st.warning(f"⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nTemporalidad: **{temporalidad}**. El precio está comprimido o sin dirección clara. Protege tu capital.")
+        st.warning(f"⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nTemporalidad: **{temporalidad}**. El precio está comprimido o sin dirección clara.")
     elif alcista_confluencia:
-        base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
-        probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
         st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Temporalidad:** {temporalidad}\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
     elif bajista_confluencia:
-        base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
-        probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
         st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Temporalidad:** {temporalidad}\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
     else:
-        st.info(f"⏳ **MERCADO INDECISO (ESPERA)**\n\nTemporalidad: **{temporalidad}**. Las herramientas no muestran confluencia firme para este cierre de ciclo.")
+        st.info(f"⏳ **MERCADO INDECISO (ESPERA)**\n\nTemporalidad: **{temporalidad}**. Las herramientas no muestran confluencia firme en este ciclo.")
 
-    # Gráfico interactivo de Velas Japonesas optimizado
+    # Gráfico interactivo de Velas Japonesas
     st.subheader(f"📊 Gráfico de Velas Japonesas - BTC/USDT ({temporalidad})")
     
     fig = go.Figure(data=[go.Candlestick(
@@ -250,7 +253,7 @@ try:
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': True})
 
-    # Sección del Libro de Órdenes
+    # Libro de Órdenes
     st.subheader("📖 Libro de Órdenes en Tiempo Real (Binance)")
     bids, asks = get_order_book()
 

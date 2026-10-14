@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import datetime
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA WEB Y ESTILOS
@@ -12,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilos CSS personalizados para mejorar la paleta de colores y aspecto visual
+# Estilos CSS personalizados (Paleta oscura profesional)
 st.markdown("""
     <style>
     .stApp {
@@ -28,15 +29,8 @@ st.markdown("""
         padding: 0.5rem 1rem;
     }
     div.stButton > button:hover {
-        background: linear-gradient(135deg, #2ea043 0%, #3fb950 100%);
+        background: linear-gradient(135deg, #2ea043 100%, #3fb950 100%);
         color: white;
-    }
-    .metric-card {
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -45,10 +39,10 @@ SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional con **Velas Japonesas, RSI (7), MACD, Bandas de Bollinger, Volumen y Libro de Órdenes**.")
+st.markdown("Análisis técnico profesional sincronizado para **Scalping (1m) y Estándar (5m)** con Velas Japonesas, RSI, MACD, Bollinger y Libro de Órdenes.")
 
 # ==========================================
-# BARRA LATERAL (Configuración limpia)
+# BARRA LATERAL (Ajustes de Temporalidad)
 # ==========================================
 st.sidebar.header("🎛️ Ajustes del Sistema")
 temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
@@ -138,8 +132,7 @@ def parse_klines(data):
     return df
 
 def get_order_book():
-    """Obtiene el libro de órdenes en tiempo real de Binance (Bids y Asks)"""
-    url = f"https://api.binance.com/api/v3/depth?symbol={SYMBOL}&limit=8"
+    url = f"https://api.binance.com/api/v3/depth?symbol={SYMBOL}&limit=6"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         response = requests.get(url, headers=headers, timeout=5)
@@ -153,7 +146,23 @@ def get_order_book():
     return pd.DataFrame(), pd.DataFrame()
 
 # ==========================================
-# INTERFAZ PRINCIPAL Y ACCIÓN DE ACTUALIZAR
+# CONTROL DE TIEMPO Y CICLOS EXACTOS
+# ==========================================
+now = datetime.now()
+current_minute = now.minute
+current_second = now.second
+
+# Cálculo del tiempo restante para el siguiente cierre de vela según el periodo
+intervalo_val = 1 if temporalidad == "1m" else 5
+minutos_faltantes = intervalo_val - (current_minute % intervalo_val)
+if minutos_faltantes == intervalo_val and current_second > 0:
+    minutos_faltantes = 0
+segundos_para_cierre = (minutos_faltantes * 60) - current_second
+if segundos_para_cierre <= 0:
+    segundos_para_cierre = intervalo_val * 60
+
+# ==========================================
+# INTERFAZ PRINCIPAL
 # ==========================================
 col_m1, col_m2, col_m3, col_btn = st.columns([2, 2, 2, 2])
 
@@ -168,7 +177,7 @@ try:
     # Métricas principales arriba
     col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
     col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-    col_m3.metric("Temporalidad", temporalidad)
+    col_m3.metric("Ciclo Actual", f"{temporalidad} (Cierra en {segundos_para_cierre}s)")
     
     with col_btn:
         st.write("") 
@@ -204,21 +213,21 @@ try:
         current_price >= lower_b
     )
 
-    # Estado de la predicción
+    # Estado de la predicción con los ciclos sincronizados
     if es_lateral:
-        st.warning("⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nEl precio está comprimido en las Bandas de Bollinger o sin fuerza direccional clara. Evita operar.")
+        st.warning(f"⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nTemporalidad: **{temporalidad}**. El precio está comprimido o sin dirección clara. Protege tu capital.")
     elif alcista_confluencia:
         base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
         probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
-        st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
+        st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Temporalidad:** {temporalidad}\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
     elif bajista_confluencia:
         base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
         probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
-        st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
+        st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Temporalidad:** {temporalidad}\n* **Probabilidad:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
     else:
-        st.info("⏳ **MERCADO INDECISO (ESPERA)**\n\nLas herramientas no muestran confluencia clara en este ciclo.")
+        st.info(f"⏳ **MERCADO INDECISO (ESPERA)**\n\nTemporalidad: **{temporalidad}**. Las herramientas no muestran confluencia firme para este cierre de ciclo.")
 
-    # Gráfico interactivo de Velas Japonesas optimizado (Zoom táctil fluido)
+    # Gráfico interactivo de Velas Japonesas optimizado
     st.subheader(f"📊 Gráfico de Velas Japonesas - BTC/USDT ({temporalidad})")
     
     fig = go.Figure(data=[go.Candlestick(
@@ -241,9 +250,7 @@ try:
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': True})
 
-    # ==========================================
-    # SECCIÓN NUEVA: LIBRO DE ÓRDENES (ORDER BOOK)
-    # ==========================================
+    # Sección del Libro de Órdenes
     st.subheader("📖 Libro de Órdenes en Tiempo Real (Binance)")
     bids, asks = get_order_book()
 

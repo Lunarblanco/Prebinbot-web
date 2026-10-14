@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
-import urllib.parse
 import pandas as pd
+import plotly.graph_objects as go
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA WEB
@@ -9,19 +9,19 @@ import pandas as pd
 st.set_page_config(
     page_title="BTC/USDT Señales PRO",
     page_icon="📈",
-    layout="centered"
+    layout="wide"
 )
 
 SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional con **RSI (7), MACD, Bandas de Bollinger y Volumen** para scalping y opciones.")
+st.markdown("Análisis técnico profesional con **Velas Japonesas, RSI (7), MACD, Bandas de Bollinger y Volumen**.")
 
 # Barra lateral para controles
 st.sidebar.header("🎛️ Configuración de Análisis")
-temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=1)
-modo_analisis = st.sidebar.button("🔍 Ejecutar Análisis en Vivo")
+temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
+modo_analisis = st.sidebar.button("🔍 Actualizar Análisis")
 
 # ==========================================
 # FUNCIONES TÉCNICAS
@@ -74,70 +74,96 @@ def get_binance_data(interval):
     response = requests.get(url, timeout=10)
     data = response.json()
     
-    closes = [float(candle[4]) for candle in data]
-    volumes = [float(candle[5]) for candle in data]
-    return closes, volumes
+    df = pd.DataFrame(data, columns=[
+        'Open_time', 'Open', 'High', 'Low', 'Close', 'Volume',
+        'Close_time', 'Quote_asset_volume', 'Number_of_trades',
+        'Taker_buy_base_asset_volume', 'Taker_buy_quote_asset_volume', 'Ignore'
+    ])
+    df['Time'] = pd.to_datetime(df['Open_time'], unit='ms')
+    for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+        df[col] = df[col].astype(float)
+        
+    return df
 
 # ==========================================
 # EJECUCIÓN DEL ANÁLISIS
 # ==========================================
-if modo_analisis or True: # Se ejecuta por defecto al cargar o al pulsar el botón
-    try:
-        closes, volumes = get_binance_data(temporalidad)
-        current_price = closes[-1]
-        
-        rsi = calculate_rsi(closes, 7)
-        _, macd_hist = calculate_macd(closes)
-        upper_b, middle_b, lower_b = calculate_bollinger_bands(closes, 20, 2)
-        
-        volumen_promedio = sum(volumes[-11:-1]) / 10
-        volumen_fuerte = volumes[-1] > (volumen_promedio * 1.1)
+try:
+    df_data = get_binance_data(temporalidad)
+    closes = df_data['Close'].tolist()
+    volumes = df_data['Volume'].tolist()
+    current_price = closes[-1]
+    
+    rsi = calculate_rsi(closes, 7)
+    _, macd_hist = calculate_macd(closes)
+    upper_b, middle_b, lower_b = calculate_bollinger_bands(closes, 20, 2)
+    
+    volumen_promedio = sum(volumes[-11:-1]) / 10
+    volumen_fuerte = volumes[-1] > (volumen_promedio * 1.1)
 
-        ancho_bandas = (upper_b - lower_b) / middle_b
-        es_lateral = ancho_bandas < 0.0015 or (abs(closes[-1] - closes[-5]) < current_price * 0.0003)
+    ancho_bandas = (upper_b - lower_b) / middle_b
+    es_lateral = ancho_bandas < 0.0015 or (abs(closes[-1] - closes[-5]) < current_price * 0.0003)
 
-        alcista_confluencia = (
-            closes[-1] > closes[-2] and
-            closes[-2] > closes[-3] and
-            rsi < 72 and
-            macd_hist > 0 and
-            current_price <= upper_b
-        )
+    alcista_confluencia = (
+        closes[-1] > closes[-2] and
+        closes[-2] > closes[-3] and
+        rsi < 72 and
+        macd_hist > 0 and
+        current_price <= upper_b
+    )
 
-        bajista_confluencia = (
-            closes[-1] < closes[-2] and
-            closes[-2] < closes[-3] and
-            rsi > 28 and
-            macd_hist < 0 and
-            current_price >= lower_b
-        )
+    bajista_confluencia = (
+        closes[-1] < closes[-2] and
+        closes[-2] < closes[-3] and
+        rsi > 28 and
+        macd_hist < 0 and
+        current_price >= lower_b
+    )
 
-        # Mostrar métricas clave en la web
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Precio Actual BTC", f"${current_price:,.2f}")
-        col2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-        col3.metric("Temporalidad", temporalidad)
+    # Mostrar métricas clave en la web
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Precio Actual BTC", f"${current_price:,.2f}")
+    col2.metric("RSI Rápido (7)", f"{rsi:.2f}")
+    col3.metric("Temporalidad", temporalidad)
 
-        st.markdown("---")
+    st.markdown("---")
 
-        # Resultados de la predicción con diseño visual atractivo
-        if es_lateral:
-            st.warning("⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nEl precio está comprimido en las Bandas de Bollinger o sin fuerza direccional clara. Se recomienda evitar operaciones para proteger el capital.")
-        elif alcista_confluencia:
-            base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
-            probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
-            st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Probabilidad de Confluencia:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
-        elif bajista_confluencia:
-            base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
-            probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
-            st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Probabilidad de Confluencia:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
-        else:
-            st.info("⏳ **MERCADO INDECISO (ESPERA)**\n\nLas herramientas técnicas no muestran una confluencia firme en este ciclo. Es mejor esperar la siguiente vela.")
+    # Resultados de la predicción con diseño visual atractivo
+    if es_lateral:
+        st.warning("⚠️ **MERCADO LATERAL / RANGO DETECTADO (NO OPERAR)**\n\nEl precio está comprimido en las Bandas de Bollinger o sin fuerza direccional clara. Se recomienda evitar operaciones para proteger el capital.")
+    elif alcista_confluencia:
+        base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
+        probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
+        st.success(f"🟢 **SEÑAL PRO: MÁS ALTO (SUBIDA)**\n\n* **Probabilidad de Confluencia:** {probabilidad}%\n* **Validaciones:** MACD alcista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
+    elif bajista_confluencia:
+        base_prob = 72 + (5 if volumen_fuerte else 0) + min(15, abs(macd_hist) * 100)
+        probabilidad = round(min(94.5, max(70.0, base_prob)), 1)
+        st.error(f"🔴 **SEÑAL PRO: MÁS BAJO (BAJADA)**\n\n* **Probabilidad de Confluencia:** {probabilidad}%\n* **Validaciones:** MACD bajista, RSI controlado y volumen {'fuerte' if volumen_fuerte else 'normal'}.")
+    else:
+        st.info("⏳ **MERCADO INDECISO (ESPERA)**\n\nLas herramientas técnicas no muestran una confluencia firme en este ciclo. Es mejor esperar la siguiente vela.")
 
-        # Gráfico visual limpio con Streamlit
-        st.subheader(fültro := f"Evolución Reciente del Precio ({temporalidad})")
-        df_chart = pd.DataFrame({"Precio": closes[-30:]})
-        st.line_chart(df_chart)
+    # Gráfico interactivo de Velas Japonesas con Plotly
+    st.subheader(f"📊 Gráfico de Velas Japonesas - BTC/USDT ({temporalidad})")
+    
+    fig = go.Figure(data=[go.Candlestick(
+        x=df_data['Time'],
+        open=df_data['Open'],
+        high=df_data['High'],
+        low=df_data['Low'],
+        close=df_data['Close'],
+        name="BTC"
+    )])
+    
+    fig.update_layout(
+        xaxis_title="Hora",
+        yaxis_title="Precio (USDT)",
+        template="plotly_dark",
+        height=450,
+        margin=dict(l=10, r=10, t=10, b=10)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
-    except Exception as e:
-        st.error(f"Error al conectar con los datos de Binance: {e}")
+except Exception as e:
+    st.error(f"Error al conectar con los datos de Binance: {e}")
+    

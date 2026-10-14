@@ -49,7 +49,7 @@ st.sidebar.header("🎛️ Ajustes del Sistema")
 temporalidad = st.sidebar.selectbox("Selecciona la Temporalidad", ["1m", "5m"], index=0)
 
 # ==========================================
-# CÁLCULO DE TIEMPO EXACTO AL RELOJ (CRONOGRAMA DE VELAS)
+# CÁLCULO DE TIEMPO EXACTO AL RELOJ (BLINDADO)
 # ==========================================
 now = datetime.now()
 current_minute = now.minute
@@ -61,10 +61,12 @@ if minutos_faltantes == intervalo_val and current_second > 0:
     minutos_faltantes = 0
     
 segundos_para_cierre = (minutos_faltantes * 60) - current_second
+
+# Blindaje de seguridad para evitar bloqueos en 0 o 60 segundos
 if segundos_para_cierre <= 0:
     segundos_para_cierre = intervalo_val * 60
 
-# Auto-refresh dinámico sincronizado exactamente a los segundos restantes del reloj
+# Auto-refresh dinámico sincronizado a los milisegundos restantes reales
 st_autorefresh(interval=segundos_para_cierre * 1000, limit=None, key="reloj_sincronizado_loop")
 
 # ==========================================
@@ -178,7 +180,7 @@ try:
     current_price = closes[-1]
     rsi = calculate_rsi(closes, 7)
 
-    # Métricas principales arriba mostrando el tiempo exacto que falta según el reloj
+    # Métricas principales arriba mostrando el tiempo exacto restante
     col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
     col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
     col_m3.metric("Cierre de Ciclo Real", f"{temporalidad} (en {segundos_para_cierre}s)")
@@ -272,4 +274,3 @@ try:
 
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
-    

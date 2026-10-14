@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-import streamlit.components.v1 as components
+import time
 
 # ==========================================
 # CONFIGURACIÓN DE LA PÁGINA WEB Y ESTILOS
@@ -40,7 +40,7 @@ SYMBOL = "BTCUSDT"
 
 # Título y descripción principal
 st.title("⚡ Panel de Señales PRO: BTC/USDT")
-st.markdown("Análisis técnico profesional con **Auto-actualización sincronizada al reloj**, Velas Japonesas, RSI, MACD y Bollinger.")
+st.markdown("Análisis técnico profesional sincronizado al reloj del mercado (**1m: 07, 08, 09... | 5m: 05, 10, 15...**).")
 
 # ==========================================
 # BARRA LATERAL (Ajustes de Temporalidad)
@@ -55,43 +55,17 @@ now = datetime.now()
 current_minute = now.minute
 current_second = now.second
 
-intervalo_val = 1 if temporalidad == "1m" else 5
-minutos_faltantes = intervalo_val - (current_minute % intervalo_val)
-if minutos_faltantes == intervalo_val and current_second > 0:
+intervalo_min = 1 if temporalidad == "1m" else 5
+minutos_faltantes = intervalo_min - (current_minute % intervalo_min)
+if minutos_faltantes == intervalo_min and current_second > 0:
     minutos_faltantes = 0
     
 segundos_para_cierre = (minutos_faltantes * 60) - current_second
 if segundos_para_cierre <= 0:
-    segundos_para_cierre = intervalo_val * 60
+    segundos_para_cierre = intervalo_min * 60
 
-# ==========================================
-# TEMPORIZADOR NATIVO JS (SINCRONIZADO)
-# ==========================================
-ms_refr = segundos_para_cierre * 1000
-js_code = f"""
-<script>
-    setTimeout(function() {{
-        window.location.reload();
-    }}, {ms_refr});
-</script>
-<div style="font-size: 13px; color: #8b949e; margin-bottom: 10px;">
-    ⏱️ Siguiente actualización de ciclo en: <span id="timer">{segundos_para_cierre}</span> segundos...
-</div>
-<script>
-    var timeLeft = {segundos_para_cierre};
-    var timerId = setInterval(iniciarTimer, 1000);
-    function iniciarTimer() {{
-        if (timeLeft <= 0) {{
-            clearInterval(timerId);
-        }} else {{
-            timeLeft -= 1;
-            var elem = document.getElementById("timer");
-            if(elem) elem.innerHTML = timeLeft;
-        }}
-    }}
-</script>
-"""
-components.html(js_code, height=35)
+# Mostramos el indicador visual del reloj sincronizado
+st.markdown(f"⏱️ **Ciclo Actual:** Sincronizado a velas de `{temporalidad}`. Próxima actualización automática del mercado en **{segundos_para_cierre} segundos**.")
 
 # ==========================================
 # FUNCIONES TÉCNICAS Y DE DATOS
@@ -193,7 +167,7 @@ try:
     # Métricas principales arriba
     col_m1.metric("Precio Actual BTC", f"${current_price:,.2f}")
     col_m2.metric("RSI Rápido (7)", f"{rsi:.2f}")
-    col_m3.metric("Ciclo Temporal", f"{temporalidad}")
+    col_m3.metric("Hora del Servidor", now.strftime("%H:%M:%S"))
     
     with col_btn:
         st.write("") 
@@ -267,3 +241,11 @@ try:
 
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
+
+# ==========================================
+# AUTO-RECARGA BASADA EN EL TIEMPO REAL DEL CICLO
+# ==========================================
+# Pausamos el script exactamente los segundos que faltan para que cierre la vela y luego forzamos la recarga
+time.sleep(segundos_para_cierre)
+st.rerun()
+    

@@ -65,7 +65,7 @@ if segundos_para_cierre <= 0:
     segundos_para_cierre = intervalo_val * 60
 
 # ==========================================
-# TEMPORIZADOR NATIVO JS (SE AUTO-REFRESCA SOLO)
+# TEMPORIZADOR NATIVO JS (CORREGIDO CON LLAVES DOBLES)
 # ==========================================
 ms_refr = segundos_para_cierre * 1000
 js_code = f"""
@@ -80,15 +80,15 @@ js_code = f"""
 <script>
     var timeLeft = {segundos_para_cierre};
     var timerId = setInterval(ionarTimer, 1000);
-    function ionarTimer() {
-        if (timeLeft <= 0) {
+    function ionarTimer() {{
+        if (timeLeft <= 0) {{
             clearInterval(timerId);
-        } else {
+        }} else {{
             timeLeft -= 1;
             var elem = document.getElementById("timer");
             if(elem) elem.innerHTML = timeLeft;
-        }
-    }
+        }}
+    }}
 </script>
 """
 components.html(js_code, height=35)
@@ -238,7 +238,7 @@ try:
     bajista_confluencia = (
         len(closes) >= 3 and
         closes[-1] < closes[-2] and
-        closes[-2] > closes[-3] and
+        closes[-2] < closes[-3] and
         rsi > 28 and
         macd_hist < 0 and
         current_price >= lower_b
@@ -298,4 +298,4 @@ try:
 
 except Exception as e:
     st.error(f"Error al conectar con los datos de Binance: {e}")
-        
+                     
